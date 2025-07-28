@@ -367,6 +367,13 @@ class Config:
         if self.replica_namespace:
             self.logger.info("***PROD REPLICA NAMESPACE DETECTED - Kafka operations will be disabled ***")
 
+        # OpenTelemetry configuration
+        self.otel_enabled = os.environ.get("OTEL_ENABLED", "false").lower() == "true"
+        self.otel_service_name = os.environ.get("OTEL_SERVICE_NAME", "insights-host-inventory")
+        self.otel_jaeger_endpoint = os.environ.get("OTEL_JAEGER_ENDPOINT")
+        self.otel_otlp_endpoint = os.environ.get("OTEL_OTLP_ENDPOINT")
+        self.otel_console_exporter = os.environ.get("OTEL_CONSOLE_EXPORTER", "false").lower() == "true"
+
     def _build_base_url_path(self):
         app_name = os.getenv("APP_NAME", "inventory")
         path_prefix = os.getenv("PATH_PREFIX", "api")
@@ -496,3 +503,13 @@ class Config:
         if self._runtime_environment.metrics_pushgateway_enabled:
             self.logger.info("Metrics Pushgateway: %s", self.prometheus_pushgateway)
             self.logger.info("Kubernetes Namespace: %s", self.kubernetes_namespace)
+
+        # OpenTelemetry configuration logging
+        self.logger.info("OpenTelemetry Enabled: %s", self.otel_enabled)
+        if self.otel_enabled:
+            self.logger.info("OpenTelemetry Service Name: %s", self.otel_service_name)
+            if self.otel_jaeger_endpoint:
+                self.logger.info("OpenTelemetry Jaeger Endpoint: %s", self.otel_jaeger_endpoint)
+            if self.otel_otlp_endpoint:
+                self.logger.info("OpenTelemetry OTLP Endpoint: %s", self.otel_otlp_endpoint)
+            self.logger.info("OpenTelemetry Console Exporter: %s", self.otel_console_exporter)

@@ -6,6 +6,7 @@ from api.cache import init_cache
 from app import create_app
 from app.environment import RuntimeEnvironment
 from app.logging import get_logger
+from app.otel_config import setup_opentelemetry
 from app.queue.event_producer import create_event_producer
 from app.queue.host_mq import HBIMessageConsumerBase
 from app.queue.host_mq import IngressMessageConsumer
@@ -21,6 +22,10 @@ logger = get_logger("host_mq_service")
 def main():
     application = create_app(RuntimeEnvironment.SERVICE)
     config = application.app.config["INVENTORY_CONFIG"]
+
+    # Initialize OpenTelemetry
+    setup_opentelemetry()
+
     init_cache(config, application)
     start_http_server(config.metrics_port)
 

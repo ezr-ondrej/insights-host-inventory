@@ -47,6 +47,14 @@ from app.models import Host
 from app.models import HostGroupAssoc
 from app.models import LimitedHostSchema
 from app.models import db
+from app.otel_instrumentation import add_span_attributes
+from app.otel_instrumentation import create_child_span
+from app.otel_instrumentation import record_host_operation_result
+from app.otel_instrumentation import trace_batch_operation
+
+# OpenTelemetry imports
+from app.otel_instrumentation import trace_host_operation
+from app.otel_instrumentation import trace_mq_message_processing
 from app.payload_tracker import PayloadTrackerContext
 from app.payload_tracker import PayloadTrackerProcessingContext
 from app.payload_tracker import get_payload_tracker
@@ -318,6 +326,7 @@ class WorkspaceMessageConsumer(HBIMessageConsumerBase):
 
 class HostMessageConsumer(HBIMessageConsumerBase):
     @metrics.ingress_message_handler_time.time()
+    @trace_mq_message_processing("host_message_handling")
     def handle_message(self, message: str | bytes) -> OperationResult:
         validated_operation_msg = parse_operation_message(message, HostOperationSchema)
         platform_metadata = validated_operation_msg.get("platform_metadata", {})
@@ -372,10 +381,16 @@ class HostMessageConsumer(HBIMessageConsumerBase):
     def post_process_rows(self) -> None:
         try:
             if len(self.processed_rows) > 0:
-                db.session.commit()
+                # Add batch operation tracing
+                trace_batch_operation(len(self.processed_rows))
+
+                with create_child_span("db_commit"):
+                    db.session.commit()
+
                 # The above session is automatically committed or rolled back.
                 # Now we need to send out messages for the batch of hosts we just processed.
-                write_message_batch(self.event_producer, self.notification_event_producer, self.processed_rows)
+                with create_child_span("write_message_batch"):
+                    write_message_batch(self.event_producer, self.notification_event_producer, self.processed_rows)
 
         except StaleDataError as exc:
             metrics.ingress_message_handler_failure.inc(amount=len(self.processed_rows))
@@ -387,6 +402,12 @@ class HostMessageConsumer(HBIMessageConsumerBase):
 
 
 class IngressMessageConsumer(HostMessageConsumer):
+    @trace_host_operation(
+        "ingress_host_processing",
+        extract_host_id=lambda _, host_data, *args, **kwargs: host_data.get("id"),
+        extract_org_id=lambda _, host_data, *args, **kwargs: host_data.get("org_id"),
+        extract_reporter=lambda _, host_data, *args, **kwargs: host_data.get("reporter"),
+    )
     def process_message(
         self,
         host_data: dict[str, Any],
@@ -413,9 +434,31 @@ class IngressMessageConsumer(HostMessageConsumer):
                 input_host = _set_owner(input_host, identity)
 
             log_add_host_attempt(logger, input_host, sp_fields_to_log, identity)
+
+            # Add tracing attributes
+            add_span_attributes(
+                {
+                    "host.canonical_facts": str(input_host.canonical_facts),
+                    "host.display_name": input_host.display_name,
+                    "identity.auth_type": identity.auth_type,
+                    "identity.type": identity.identity_type.name if identity.identity_type else None,
+                }
+            )
+
             processed_hosts = [result.row for result in self.processed_rows]
             host_row, add_result = host_repository.add_host(
                 input_host, identity, operation_args=operation_args, existing_hosts=processed_hosts
+            )
+
+            # Record operation result in tracing
+            record_host_operation_result(
+                add_result,
+                {
+                    "id": str(host_row.id),
+                    "org_id": host_row.org_id,
+                    "reporter": host_row.reporter,
+                    "account": host_row.account,
+                },
             )
 
             # If this is a new host, assign it to the "ungrouped hosts" group/workspace
@@ -449,6 +492,12 @@ class IngressMessageConsumer(HostMessageConsumer):
 
 
 class SystemProfileMessageConsumer(HostMessageConsumer):
+    @trace_host_operation(
+        "system_profile_update",
+        extract_host_id=lambda _, host_data, *args, **kwargs: host_data.get("id"),
+        extract_org_id=lambda _, host_data, *args, **kwargs: host_data.get("org_id"),
+        extract_reporter=lambda _, host_data, *args, **kwargs: host_data.get("reporter"),
+    )
     def process_message(
         self,
         host_data: dict[str, Any],
@@ -587,6 +636,7 @@ def _validate_json_object_for_utf8(json_object):
 
 
 @metrics.ingress_message_parsing_time.time()
+@trace_host_operation("parse_operation_message")
 def parse_operation_message(message: str | bytes, schema: type[Schema]):
     parsed_message = common_message_parser(message)
 
@@ -660,6 +710,7 @@ def write_delete_event_message(event_producer: EventProducer, result: OperationR
     result.success_logger()
 
 
+@trace_host_operation("write_event_message")
 def write_add_update_event_message(
     event_producer: EventProducer, notification_event_producer: EventProducer, result: OperationResult
 ):
@@ -679,6 +730,17 @@ def write_add_update_event_message(
         current_operation="write_message_batch",
         inventory_id=result.row.id,
     ):
+        # Add tracing attributes for event processing
+        add_span_attributes(
+            {
+                "event.type": result.event_type.name,
+                "host.id": str(result.row.id),
+                "host.org_id": result.row.org_id,
+                "host.account": result.row.account,
+                "host.reporter": result.row.reporter,
+            }
+        )
+
         output_host = serialize_host(result.row, result.staleness_timestamps, staleness=result.staleness_object)
         insights_id = result.row.canonical_facts.get("insights_id")
         event = build_event(result.event_type, output_host, platform_metadata=result.platform_metadata)

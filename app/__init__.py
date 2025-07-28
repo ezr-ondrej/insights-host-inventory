@@ -28,6 +28,7 @@ from app.logging import get_logger
 from app.logging import threadctx
 from app.models import SPECIFICATION_DIR
 from app.models import db
+from app.otel_config import setup_opentelemetry
 from app.queue.event_producer import create_event_producer
 from app.queue.events import EventType
 from app.queue.metrics import event_producer_failure
@@ -237,6 +238,9 @@ def create_app(runtime_environment) -> connexion.FlaskApp:
 
     app_config = Config(runtime_environment)
     app_config.log_configuration()
+
+    # Initialize OpenTelemetry (after config but before app creation)
+    setup_opentelemetry()
     swagger_options = SwaggerUIOptions(serve_spec=False)
     app = connexion.FlaskApp(
         "inventory",
