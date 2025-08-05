@@ -4,7 +4,6 @@ import sys
 from datetime import datetime
 from functools import partial
 from os import getenv
-from typing import Union
 
 from confluent_kafka import Consumer as KafkaConsumer
 from dateutil import parser
@@ -89,7 +88,7 @@ def _get_latest_commit_datetime_for_pr(owner: str, repo: str, pr_number: str) ->
     return parser.isoparse(latest_commit["commit"]["author"]["date"])
 
 
-def _get_latest_self_comment_datetime_for_pr(owner: str, repo: str, pr_number: str) -> Union[datetime, None]:
+def _get_latest_self_comment_datetime_for_pr(owner: str, repo: str, pr_number: str) -> datetime | None:
     pr_comments = _get_git_response(f"/repos/{owner}/{repo}/issues/{pr_number}/comments")
     for comment in reversed(pr_comments):
         if comment["user"]["login"] == GIT_USER:
