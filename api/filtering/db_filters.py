@@ -209,7 +209,12 @@ def stale_timestamp_filter(gt=None, lte=None):
     return and_(*filters)
 
 
-def _stale_timestamp_per_reporter_filter(gt=None, lte=None, reporter=None, staleness_config=None):
+def _stale_timestamp_per_reporter_filter(
+    reporter: str,
+    gt: datetime | None = None,
+    lte: datetime | None = None,
+    staleness_config: dict | None = None,
+) -> Any:
     """
     Filter hosts by reporter staleness.
 
@@ -218,6 +223,15 @@ def _stale_timestamp_per_reporter_filter(gt=None, lte=None, reporter=None, stale
     - Nested format: {"reporter": {"last_check_in": "...", "culled_timestamp": "...", ...}}
 
     Uses PostgreSQL's jsonb_typeof() to detect format and apply appropriate logic.
+
+    Args:
+        reporter: Reporter name to filter by (required, can start with '!' for negation)
+        gt: Filter for timestamps greater than this value
+        lte: Filter for timestamps less than or equal to this value
+        staleness_config: Staleness configuration dict containing conventional_time_to_delete
+
+    Returns:
+        SQLAlchemy filter expression
     """
     non_negative_reporter = reporter.replace("!", "")
     reporter_list = [non_negative_reporter]
