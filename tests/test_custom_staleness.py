@@ -306,6 +306,11 @@ def test_async_update_host_update_custom_staleness_no_modified_on_change(
             assert event_producer.write_event.call_count == num_hosts
 
 
+# ============================================================================
+# NESTED FORMAT TESTS (these can be removed after RHINENG-21703 is completed)
+# ============================================================================
+
+
 def test_registered_with_filter_handles_multi_reporter_hosts(
     db_create_staleness_culling,
     db_create_host,
